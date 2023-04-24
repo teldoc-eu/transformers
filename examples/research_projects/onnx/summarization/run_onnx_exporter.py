@@ -28,8 +28,7 @@ from bart_onnx.generation_onnx import BARTBeamSearchGenerator
 from bart_onnx.reduce_onnx_size import remove_dup_initializers
 
 import transformers
-from transformers import BartForConditionalGeneration, BartTokenizer
-
+from transformers import BartForConditionalGeneration, BartTokenizer, AutoModelForSeq2SeqLM
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s |  [%(filename)s:%(lineno)d] %(message)s",
@@ -90,8 +89,15 @@ def parse_args():
 
 
 def load_model_tokenizer(model_name, device="cpu"):
-    huggingface_model = model_dict[model_name].from_pretrained(model_name).to(device)
-    tokenizer = tokenizer_dict[model_name].from_pretrained(model_name)
+    # huggingface_model = AutoModelForSeq2SeqLM.from_pretrained(model_name).to(device)
+    # tokenizer = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+
+    huggingface_model = BartForConditionalGeneration.from_pretrained(model_name).to(device)
+    tokenizer = BartTokenizer.from_pretrained(model_name)
+
+    huggingface_model.config.no_repeat_ngram_size = 0
+    huggingface_model.config.forced_bos_token_id = None
+    huggingface_model.config.min_length = 0
 
     if model_name in ["facebook/bart-base"]:
         huggingface_model.config.no_repeat_ngram_size = 0
@@ -108,7 +114,7 @@ def export_and_validate_model(model, tokenizer, onnx_file_path, num_beams, max_l
     bart_script_model = torch.jit.script(BARTBeamSearchGenerator(model))
 
     with torch.no_grad():
-        ARTICLE_TO_SUMMARIZE = "My friends are cool but they eat too many carbs."
+        ARTICLE_TO_SUMMARIZE = "My friends are cool but they eat too many carbs. They do not suck."
         inputs = tokenizer([ARTICLE_TO_SUMMARIZE], max_length=1024, return_tensors="pt").to(model.device)
 
         summary_ids = model.generate(
@@ -135,6 +141,7 @@ def export_and_validate_model(model, tokenizer, onnx_file_path, num_beams, max_l
             output_names=["output_ids"],
             dynamic_axes={
                 "input_ids": {0: "batch", 1: "seq"},
+                "attention_mask": {0: "batch", 1: "seq"},
                 "output_ids": {0: "batch", 1: "seq_out"},
             },
             example_outputs=summary_ids,
